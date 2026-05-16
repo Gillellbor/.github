@@ -1,46 +1,54 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "description": "Renovate config preset for Šimon Hradní personal projects. Repos extend this via {\"extends\": [\"local>Gillellbor/.github\"]}.",
+  "description": "Renovate config preset for Šimon Hradní personal projects. Aggressive auto-merge — all patch + minor go through without manual gate, majors require review. Repos extend this via {\"extends\": [\"local>Gillellbor/.github\"]}.",
   "extends": [
     "config:recommended",
     "schedule:earlyMondays",
     ":semanticCommits",
     ":dependencyDashboard",
     "group:monorepos",
-    "group:recommended"
+    "group:recommended",
+    ":enablePreCommit",
+    "helpers:pinGitHubActionDigests"
   ],
   "timezone": "Europe/Prague",
   "labels": ["dependencies"],
   "rangeStrategy": "bump",
+  "rebaseWhen": "auto",
   "prHourlyLimit": 4,
   "prConcurrentLimit": 10,
-  "rebaseWhen": "auto",
-  "dependencyDashboardTitle": "Renovate dependency dashboard",
+  "dependencyDashboardTitle": "🤖 Renovate dependency dashboard",
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
   "vulnerabilityAlerts": {
     "enabled": true,
     "labels": ["dependencies", "security"],
     "schedule": ["at any time"],
-    "prPriority": 10
+    "prPriority": 10,
+    "automerge": true
   },
+  "osvVulnerabilityAlerts": true,
   "lockFileMaintenance": {
     "enabled": true,
+    "automerge": true,
     "schedule": ["before 6am on the first day of the month"]
   },
   "packageRules": [
     {
-      "description": "Auto-merge devDependencies on green CI (patch + minor only)",
-      "matchDepTypes": ["devDependencies"],
-      "matchUpdateTypes": ["patch", "minor"],
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
+      "description": "Auto-merge ALL patch updates on green CI",
+      "matchUpdateTypes": ["patch", "pin", "digest"],
+      "automerge": true
     },
     {
-      "description": "Auto-merge patch updates on green CI (any dep type)",
-      "matchUpdateTypes": ["patch"],
-      "automerge": true,
-      "automergeType": "pr",
-      "automergeStrategy": "squash"
+      "description": "Auto-merge ALL minor updates on green CI",
+      "matchUpdateTypes": ["minor"],
+      "automerge": true
+    },
+    {
+      "description": "Auto-merge devDependencies major updates too — lower blast radius, CI catches real breaks",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["major"],
+      "automerge": true
     },
     {
       "description": "Group all linting/formatting tools in one PR",
@@ -91,15 +99,35 @@
       "groupName": "Supabase clients"
     },
     {
-      "description": "Pin GitHub Actions to full SHA (post-tj-actions hardening)",
-      "matchManagers": ["github-actions"],
-      "pinDigests": true
+      "description": "Group AI SDK packages",
+      "matchPackageNames": [
+        "ai",
+        "@ai-sdk/anthropic",
+        "@ai-sdk/openai",
+        "@ai-sdk/react",
+        "@ai-sdk/google"
+      ],
+      "groupName": "AI SDK"
     },
     {
-      "description": "Major upgrades — require manual review, never auto-merge",
+      "description": "Pin GitHub Actions to full SHA (post-tj-actions CVE-2025-30066 hardening)",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "automerge": true
+    },
+    {
+      "description": "Major production deps — require manual review",
+      "matchUpdateTypes": ["major"],
+      "matchDepTypes": ["dependencies"],
+      "automerge": false,
+      "labels": ["dependencies", "major-update", "needs-review"]
+    },
+    {
+      "description": "Special-case Next.js + React major — always manual (breaking by definition)",
+      "matchPackageNames": ["next", "react", "react-dom"],
       "matchUpdateTypes": ["major"],
       "automerge": false,
-      "labels": ["dependencies", "major-update"]
+      "labels": ["dependencies", "major-update", "framework-upgrade", "needs-review"]
     }
   ],
   "github-actions": {
