@@ -1,0 +1,34 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate preset for tier-public-template repos (Gillellbor org). Stricter SHA-pin enforcement, weekly cadence, manual major review. Repos extend via {\"extends\": [\"local>Gillellbor/.github:template\"]}.",
+  "extends": [
+    "local>Gillellbor/.github"
+  ],
+  "labels": ["dependencies", "tier-template"],
+  "prHourlyLimit": 2,
+  "schedule": ["before 8am on monday"],
+  "packageRules": [
+    {
+      "description": "Public templates: NEVER auto-merge major (community sees this code as reference)",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-update", "needs-review", "template-impact"]
+    },
+    {
+      "description": "GitHub Actions: SHA-pin enforced, auto-merge digest updates only",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "automerge": true,
+      "matchUpdateTypes": ["digest", "patch"]
+    },
+    {
+      "description": "GitHub Actions major/minor updates need manual review (template will propagate to consumers)",
+      "matchManagers": ["github-actions"],
+      "matchUpdateTypes": ["major", "minor"],
+      "automerge": false
+    }
+  ],
+  "npm": {
+    "minimumReleaseAge": "7 days"
+  }
+}

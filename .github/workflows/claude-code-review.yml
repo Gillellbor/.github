@@ -1,0 +1,90 @@
+name: Reusable Claude Code Review
+
+# Opt-in code review via Claude Code GitHub Action.
+# Triggers: PR label `claude-review` OR comment containing `@claude review`.
+# Per-PR opt-in. NO auto-trigger on every commit.
+#
+# Consumer pattern (in <project>/.github/workflows/claude-code-review.yml):
+#   name: Claude Code Review
+#   on:
+#     pull_request:
+#       types: [labeled, opened]
+#     issue_comment:
+#       types: [created]
+#   jobs:
+#     review:
+#       uses: Gillellbor/.github/.github/workflows/claude-code-review.yml@main
+#       secrets:
+#         ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+#
+# Usage: add label `claude-review` to PR OR comment `@claude review`.
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: "Anthropic model (claude-sonnet-4-6 default, claude-opus-4-7 for heavy)"
+        type: string
+        default: "claude-sonnet-4-6"
+      max-turns:
+        description: "Max iteration turns (cost control)"
+        type: string
+        default: "5"
+    secrets:
+      ANTHROPIC_API_KEY:
+        required: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  review:
+    if: |
+      (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'claude-review')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request != null && contains(github.event.comment.body, '@claude review'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MODEL: ${{ inputs.model }}
+      MAX_TURNS: ${{ inputs.max-turns }}
+    steps:
+      - name: Harden runner (egress monitoring)
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+
+      - name: Claude Code Review
+        uses: anthropics/claude-code-action@dab98a4d7c69f7d8e9d3a4f8a5e7e8e2c5f6d3a1 # v1.0.0
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Review this PR for the project. Reference the project's CLAUDE.md and any docs/ files for context-specific standards.
+
+            Output format:
+            - Start with a 2-3 sentence summary of overall assessment.
+            - Inline comments tagged by severity:
+              - [CRITICAL] — security issues, bugs that break production, data loss risks
+              - [IMPORTANT] — bugs, performance regressions, maintainability issues
+              - [NIT] — style, naming, minor improvements
+            - End with explicit recommendation: APPROVE / REQUEST CHANGES / COMMENT.
+
+            Focus areas (in priority order):
+            1. Security — injection, secrets in code, missing auth/validation, supply chain risks
+            2. Bugs — logic errors, null/undefined handling, edge cases
+            3. Performance — N+1 queries, blocking I/O, unnecessary re-renders
+            4. Maintainability — naming, structure, dead code, premature abstractions
+            5. Tests — missing coverage for new logic
+            6. Style — only flag deviations from project conventions
+
+            Skip nits unless there are < 5 important/critical issues. Don't comment on every line.
+          claude_args: |
+            --max-turns ${{ env.MAX_TURNS }}
+            --model ${{ env.MODEL }}

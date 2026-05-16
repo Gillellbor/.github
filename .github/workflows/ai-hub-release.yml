@@ -1,0 +1,147 @@
+name: Reusable AI Hub Per-Client Release
+
+# Per-client Docker image build + push matrix for ai-hub-master (ADR-010).
+# Triggered by SemVer git tag push. Iterates clients/*.json, builds + pushes per-client image to GHCR.
+#
+# Consumer pattern (in <project>/.github/workflows/release.yml):
+#   on:
+#     push:
+#       tags: ["v*.*.*"]
+#   jobs:
+#     release:
+#       uses: Gillellbor/.github/.github/workflows/ai-hub-release.yml@main
+#       with:
+#         registry: ghcr.io
+#         image-prefix: gillellbor/ai-hub
+#       secrets:
+#         GHCR_TOKEN: ${{ secrets.GHCR_TOKEN }}
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: "Container registry (default: ghcr.io)"
+        type: string
+        default: "ghcr.io"
+      image-prefix:
+        description: "Image prefix, e.g. gillellbor/ai-hub (will produce ai-hub-{slug}:tag)"
+        type: string
+        required: true
+      clients-dir:
+        description: "Path to clients config directory"
+        type: string
+        default: "clients"
+    secrets:
+      GHCR_TOKEN:
+        description: "GHCR push token (or GITHUB_TOKEN with packages:write)"
+        required: true
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write
+
+jobs:
+  enumerate-clients:
+    name: Enumerate clients
+    runs-on: ubuntu-latest
+    outputs:
+      clients: ${{ steps.list.outputs.clients }}
+    env:
+      CLIENTS_DIR: ${{ inputs.clients-dir }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: List client slugs
+        id: list
+        run: |
+          if [ ! -d "$CLIENTS_DIR" ]; then
+            echo "Clients directory not found: $CLIENTS_DIR"
+            exit 1
+          fi
+          slugs=$(ls "$CLIENTS_DIR"/*.json 2>/dev/null | xargs -n1 basename | sed 's/\.json$//' | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "clients=$slugs" >> "$GITHUB_OUTPUT"
+          echo "Found clients: $slugs"
+
+  build:
+    name: Build & push ${{ matrix.slug }}
+    needs: enumerate-clients
+    if: needs.enumerate-clients.outputs.clients != '[]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        slug: ${{ fromJSON(needs.enumerate-clients.outputs.clients) }}
+    env:
+      REGISTRY: ${{ inputs.registry }}
+      IMAGE_PREFIX: ${{ inputs.image-prefix }}
+      CLIENT_SLUG: ${{ matrix.slug }}
+      CLIENTS_DIR: ${{ inputs.clients-dir }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@885d1462b80bc1c1c7f0b00334ad271f09369c55 # v3.6.1
+
+      - name: Log in to GHCR
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GHCR_TOKEN }}
+
+      - name: Validate client config
+        run: |
+          config="${CLIENTS_DIR}/${CLIENT_SLUG}.json"
+          if [ ! -f "$config" ]; then
+            echo "Config not found: $config"
+            exit 1
+          fi
+          jq empty "$config" || { echo "Invalid JSON in $config"; exit 1; }
+          echo "Client config valid"
+          jq . "$config"
+
+      - name: Extract tag from git ref
+        id: tag
+        env:
+          GITHUB_REF_NAME_INPUT: ${{ github.ref_name }}
+        run: |
+          # github.ref_name is "v1.2.3" → strip "v" prefix
+          TAG="${GITHUB_REF_NAME_INPUT#v}"
+          echo "version=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Build image with client-specific args
+        env:
+          VERSION_TAG: ${{ steps.tag.outputs.version }}
+        run: |
+          IMAGE="${REGISTRY}/${IMAGE_PREFIX}-${CLIENT_SLUG}"
+          MODULES=$(jq -r '.modules // [] | join(",")' "${CLIENTS_DIR}/${CLIENT_SLUG}.json")
+          docker buildx build \
+            --build-arg "BUILD_TARGET=client" \
+            --build-arg "CLIENT_SLUG=${CLIENT_SLUG}" \
+            --build-arg "MODULES=${MODULES}" \
+            --tag "${IMAGE}:${VERSION_TAG}" \
+            --tag "${IMAGE}:stable" \
+            --push \
+            .
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@7668571508540a607bdfd90a87a560489fe372eb # v2.1.0
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image-prefix }}-${{ matrix.slug }}
+          push-to-registry: true

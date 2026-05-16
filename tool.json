@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate preset for tier-tool repos (internal tools, MCP servers, libraries). Standard config + npm publish-aware version groups. Repos extend via {\"extends\": [\"local>Gillellbor/.github:tool\"]}.",
+  "extends": [
+    "local>Gillellbor/.github"
+  ],
+  "labels": ["dependencies", "tier-tool"],
+  "packageRules": [
+    {
+      "description": "Tool dependencies: same auto-merge as production",
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true
+    },
+    {
+      "description": "Group MCP SDK packages",
+      "matchPackageNames": [
+        "@modelcontextprotocol/sdk",
+        "@modelcontextprotocol/sdk-stdio",
+        "fastmcp"
+      ],
+      "groupName": "MCP SDK"
+    },
+    {
+      "description": "Group Anthropic SDK packages",
+      "matchPackageNames": [
+        "@anthropic-ai/sdk",
+        "@anthropic-ai/claude-code"
+      ],
+      "groupName": "Anthropic SDK"
+    },
+    {
+      "description": "Group test runners",
+      "matchPackageNames": [
+        "vitest",
+        "@vitest/coverage-v8",
+        "@vitest/ui",
+        "happy-dom",
+        "jsdom"
+      ],
+      "groupName": "test runners"
+    }
+  ]
+}

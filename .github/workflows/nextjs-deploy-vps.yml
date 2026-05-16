@@ -1,0 +1,159 @@
+name: Reusable Next.js Deploy to VPS
+
+# Reusable deploy workflow for Next.js → Docker → Caddy on Linux VPS.
+# Aligns with server-rules.md deploy.sh standard:
+# rsync source → scp .env → docker tag :prev → docker build → force-recreate → prune → health check.
+#
+# Consumer pattern (in <project>/.github/workflows/deploy.yml):
+#   on:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+#   jobs:
+#     deploy:
+#       uses: Gillellbor/.github/.github/workflows/nextjs-deploy-vps.yml@main
+#       with:
+#         host: core-prod
+#         service: hradni-net
+#         remote-path: /opt/hradni-net
+#         health-check-url: https://hradni.net/api/health
+#       secrets:
+#         SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+#         SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+#         ENV_FILE_BASE64: ${{ secrets.ENV_FILE_BASE64 }}
+
+on:
+  workflow_call:
+    inputs:
+      host:
+        description: "SSH host alias"
+        type: string
+        required: true
+      service:
+        description: "Docker compose service name"
+        type: string
+        required: true
+      remote-path:
+        description: "Remote path on VPS"
+        type: string
+        required: true
+      health-check-url:
+        description: "Public URL to verify after deploy"
+        type: string
+        required: true
+      ssh-user:
+        description: "SSH user (default: deploy)"
+        type: string
+        default: "deploy"
+    secrets:
+      SSH_PRIVATE_KEY:
+        required: true
+      SSH_KNOWN_HOSTS:
+        required: true
+      ENV_FILE_BASE64:
+        description: "Base64-encoded .env.local contents"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-${{ inputs.service }}-${{ inputs.host }}
+      cancel-in-progress: false
+    env:
+      SSH_USER: ${{ inputs.ssh-user }}
+      SSH_HOST: ${{ inputs.host }}
+      SERVICE: ${{ inputs.service }}
+      REMOTE_PATH: ${{ inputs.remote-path }}
+      HEALTH_URL: ${{ inputs.health-check-url }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@a6f90b1f127823b31d4d4a8d96047790581349bd # v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Pin known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_KNOWN_HOSTS }}" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Rsync source to VPS
+        run: |
+          rsync -avz --delete \
+            --exclude='node_modules' \
+            --exclude='.next' \
+            --exclude='.git' \
+            --exclude='data' \
+            --exclude='*.md' \
+            --exclude='.env*' \
+            -e "ssh -o StrictHostKeyChecking=yes" \
+            ./ "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/"
+
+      - name: Decode and upload .env.local
+        env:
+          ENV_BASE64: ${{ secrets.ENV_FILE_BASE64 }}
+        run: |
+          echo "$ENV_BASE64" | base64 -d > /tmp/env.local
+          scp -o StrictHostKeyChecking=yes /tmp/env.local "${SSH_USER}@${SSH_HOST}:${REMOTE_PATH}/.env.local"
+          rm /tmp/env.local
+
+      - name: Tag previous image for rollback
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${SSH_USER}@${SSH_HOST}" \
+            "docker tag ${SERVICE}:latest ${SERVICE}:prev 2>/dev/null || echo 'No previous image to tag (first deploy)'"
+
+      - name: Build new image
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${SSH_USER}@${SSH_HOST}" \
+            "cd ${REMOTE_PATH} && docker build -t ${SERVICE} ."
+
+      - name: Force-recreate container
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${SSH_USER}@${SSH_HOST}" \
+            "cd ${REMOTE_PATH} && docker compose up -d --force-recreate --no-deps ${SERVICE}"
+
+      - name: Prune old images
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${SSH_USER}@${SSH_HOST}" \
+            "docker image prune -f"
+
+      - name: Health check (retry 6× with 10s backoff)
+        env:
+          URL: ${{ inputs.health-check-url }}
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -sf -o /dev/null -w "%{http_code}" "$URL" | grep -q '^2\|^3'; then
+              echo "Health check passed (attempt $attempt)"
+              exit 0
+            fi
+            echo "Attempt $attempt failed, retrying in 10s..."
+            sleep 10
+          done
+          echo "Health check failed after 6 attempts. Triggering rollback hint."
+          echo "Rollback: ssh ${SSH_HOST} 'docker tag ${SERVICE}:prev ${SERVICE}:latest && cd ${REMOTE_PATH} && docker compose up -d --force-recreate --no-deps ${SERVICE}'"
+          exit 1
+
+      - name: Deploy summary
+        if: always()
+        env:
+          STATUS: ${{ job.status }}
+        run: |
+          echo "## Deploy Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Service: \`${SERVICE}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Host: \`${SSH_HOST}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Status: \`${STATUS}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Health URL: ${HEALTH_URL}" >> "$GITHUB_STEP_SUMMARY"

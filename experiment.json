@@ -1,0 +1,44 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate preset for tier-experiment repos (sandbox, prototypes, fun projects). Aggressive auto-merge across the board — experiments are expected to break sometimes. Repos extend via {\"extends\": [\"local>Gillellbor/.github:experiment\"]}.",
+  "extends": [
+    "config:recommended",
+    ":semanticCommits",
+    ":dependencyDashboard"
+  ],
+  "timezone": "Europe/Prague",
+  "labels": ["dependencies", "tier-experiment"],
+  "rangeStrategy": "bump",
+  "schedule": ["before 9am"],
+  "prHourlyLimit": 10,
+  "prConcurrentLimit": 20,
+  "platformAutomerge": true,
+  "automergeStrategy": "squash",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["at any time"]
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "automerge": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "Experiments: auto-merge EVERYTHING (patch + minor + major incl. devDeps)",
+      "matchUpdateTypes": ["patch", "minor", "major", "pin", "digest"],
+      "automerge": true
+    },
+    {
+      "description": "GitHub Actions: SHA-pin + auto-merge",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true,
+      "automerge": true
+    }
+  ],
+  "github-actions": {
+    "enabled": true,
+    "pinDigests": true
+  }
+}
