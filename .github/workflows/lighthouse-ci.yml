@@ -1,0 +1,86 @@
+name: Reusable Lighthouse CI
+
+# Lighthouse perf budget check for tier-production web projects.
+# Runs against deployed preview URL or local Next.js build.
+#
+# Consumer pattern (in <project>/.github/workflows/ci.yml):
+#   jobs:
+#     lighthouse:
+#       uses: Gillellbor/.github/.github/workflows/lighthouse-ci.yml@main
+#       with:
+#         urls: |
+#           https://hradni.net
+#           https://hradni.net/o-mne
+
+on:
+  workflow_call:
+    inputs:
+      urls:
+        description: "URLs to audit (newline-separated)"
+        type: string
+        required: true
+      lhci-config-path:
+        description: "Path to lighthouserc.json in consuming repo (optional)"
+        type: string
+        default: ""
+      runs:
+        description: "Number of audit runs per URL"
+        type: number
+        default: 3
+      upload-target:
+        description: "temporary-public-storage | filesystem"
+        type: string
+        default: "temporary-public-storage"
+
+permissions:
+  contents: read
+
+jobs:
+  lighthouse:
+    name: Lighthouse CI
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RUNS: ${{ inputs.runs }}
+      UPLOAD_TARGET: ${{ inputs.upload-target }}
+      LHCI_CONFIG: ${{ inputs.lhci-config-path }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: "22"
+
+      - name: Install Lighthouse CI
+        run: npm install -g @lhci/cli@0.14.x
+
+      - name: Run Lighthouse CI
+        env:
+          URLS_INPUT: ${{ inputs.urls }}
+        run: |
+          if [ -n "$LHCI_CONFIG" ] && [ -f "$LHCI_CONFIG" ]; then
+            lhci autorun --config="$LHCI_CONFIG" --collect.numberOfRuns="$RUNS" --upload.target="$UPLOAD_TARGET"
+          else
+            urls_args=""
+            while IFS= read -r url; do
+              [ -n "$url" ] && urls_args="$urls_args --collect.url=$url"
+            done <<< "$URLS_INPUT"
+            lhci autorun --collect.numberOfRuns="$RUNS" --upload.target="$UPLOAD_TARGET" $urls_args
+          fi
+
+      - name: Lighthouse summary
+        if: always()
+        run: |
+          echo "## Lighthouse CI Results" >> "$GITHUB_STEP_SUMMARY"
+          echo "Reports uploaded to: $UPLOAD_TARGET" >> "$GITHUB_STEP_SUMMARY"
+          if [ -d ".lighthouseci" ]; then
+            echo "Local reports available in workflow artifacts." >> "$GITHUB_STEP_SUMMARY"
+          fi

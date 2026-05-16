@@ -1,0 +1,90 @@
+name: Reusable Vitest Tests
+
+# Unit/integration tests via Vitest with coverage gate.
+# For tier-tool repos (and any others wanting test gates).
+#
+# Consumer pattern (in <project>/.github/workflows/ci.yml):
+#   jobs:
+#     test:
+#       uses: Gillellbor/.github/.github/workflows/vitest-tests.yml@main
+#       with:
+#         coverage-threshold: 80
+
+on:
+  workflow_call:
+    inputs:
+      coverage-threshold:
+        description: "Minimum coverage % required (lines)"
+        type: number
+        default: 0
+      test-command:
+        description: "Vitest invocation"
+        type: string
+        default: "vitest run --coverage"
+      package-manager:
+        type: string
+        default: "npm"
+      node-version:
+        type: string
+        default: "22"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  test:
+    name: Vitest
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      PM: ${{ inputs.package-manager }}
+      COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+      TEST_CMD: ${{ inputs.test-command }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install dependencies
+        run: |
+          if [ "$PM" = "pnpm" ]; then
+            pnpm install --frozen-lockfile
+          elif [ "$PM" = "yarn" ]; then
+            yarn install --frozen-lockfile
+          else
+            npm ci
+          fi
+
+      - name: Run tests
+        run: "$PM" exec ${{ inputs.test-command }}
+
+      - name: Coverage gate
+        if: inputs.coverage-threshold > 0
+        run: |
+          if [ ! -f coverage/coverage-summary.json ]; then
+            echo "No coverage summary found — make sure vitest is configured with json-summary reporter"
+            exit 1
+          fi
+          ACTUAL=$(node -e "console.log(JSON.parse(require('fs').readFileSync('coverage/coverage-summary.json')).total.lines.pct)")
+          THRESHOLD="$COVERAGE_THRESHOLD"
+          echo "Line coverage: $ACTUAL% (threshold: $THRESHOLD%)"
+          if [ "$(echo "$ACTUAL < $THRESHOLD" | bc)" -eq 1 ]; then
+            echo "Coverage below threshold"
+            exit 1
+          fi

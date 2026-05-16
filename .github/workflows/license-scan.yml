@@ -1,0 +1,73 @@
+name: Reusable License Scan
+
+# License compliance scan via license-checker.
+# For tier-public-template repos (public consumers need to know licenses).
+#
+# Consumer pattern (in <project>/.github/workflows/ci.yml):
+#   jobs:
+#     license:
+#       uses: Gillellbor/.github/.github/workflows/license-scan.yml@main
+#       with:
+#         allowed-licenses: "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense"
+
+on:
+  workflow_call:
+    inputs:
+      allowed-licenses:
+        description: "Semicolon-separated list of allowed SPDX license IDs"
+        type: string
+        default: "MIT;Apache-2.0;BSD-2-Clause;BSD-3-Clause;ISC;CC0-1.0;Unlicense;0BSD;MPL-2.0;Python-2.0"
+      package-manager:
+        type: string
+        default: "npm"
+      node-version:
+        type: string
+        default: "22"
+
+permissions:
+  contents: read
+
+jobs:
+  license-check:
+    name: License compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      PM: ${{ inputs.package-manager }}
+      ALLOWED_LICENSES: ${{ inputs.allowed-licenses }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@c6295a65d1254861815972266d5933fd6e532bdf # v2.11.1
+        with:
+          egress-policy: audit
+          disable-sudo: true
+
+      - name: Checkout
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@a7487c7e89a18df4991f7f222e4898a00d66ddda # v4.1.0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: ${{ inputs.package-manager }}
+
+      - name: Install dependencies (production only)
+        run: |
+          if [ "$PM" = "pnpm" ]; then
+            pnpm install --prod --frozen-lockfile
+          elif [ "$PM" = "yarn" ]; then
+            yarn install --production --frozen-lockfile
+          else
+            npm ci --omit=dev
+          fi
+
+      - name: Run license-checker
+        run: |
+          npx --yes license-checker@latest \
+            --production \
+            --onlyAllow="$ALLOWED_LICENSES" \
+            --summary
