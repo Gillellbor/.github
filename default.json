@@ -1,0 +1,118 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "description": "Renovate config preset for Šimon Hradní personal projects. Repos extend this via {\"extends\": [\"local>Gillellbor/.github\"]}.",
+  "extends": [
+    "config:recommended",
+    "schedule:earlyMondays",
+    ":semanticCommits",
+    ":dependencyDashboard",
+    "group:monorepos",
+    "group:recommended"
+  ],
+  "timezone": "Europe/Prague",
+  "labels": ["dependencies"],
+  "rangeStrategy": "bump",
+  "prHourlyLimit": 4,
+  "prConcurrentLimit": 10,
+  "rebaseWhen": "auto",
+  "dependencyDashboardTitle": "Renovate dependency dashboard",
+  "vulnerabilityAlerts": {
+    "enabled": true,
+    "labels": ["dependencies", "security"],
+    "schedule": ["at any time"],
+    "prPriority": 10
+  },
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 6am on the first day of the month"]
+  },
+  "packageRules": [
+    {
+      "description": "Auto-merge devDependencies on green CI (patch + minor only)",
+      "matchDepTypes": ["devDependencies"],
+      "matchUpdateTypes": ["patch", "minor"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Auto-merge patch updates on green CI (any dep type)",
+      "matchUpdateTypes": ["patch"],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "squash"
+    },
+    {
+      "description": "Group all linting/formatting tools in one PR",
+      "matchPackageNames": [
+        "eslint",
+        "prettier",
+        "biome",
+        "@biomejs/biome",
+        "@typescript-eslint/eslint-plugin",
+        "@typescript-eslint/parser",
+        "eslint-config-next"
+      ],
+      "groupName": "linters and formatters"
+    },
+    {
+      "description": "Group Next.js + React core together (they often release in sync)",
+      "matchPackageNames": [
+        "next",
+        "react",
+        "react-dom",
+        "@types/react",
+        "@types/react-dom"
+      ],
+      "groupName": "Next.js + React core"
+    },
+    {
+      "description": "Group all Radix UI packages (shadcn/ui dependencies)",
+      "matchPackageNames": ["/^@radix-ui/.*/"],
+      "groupName": "Radix UI"
+    },
+    {
+      "description": "Group Tailwind ecosystem",
+      "matchPackageNames": [
+        "tailwindcss",
+        "@tailwindcss/typography",
+        "@tailwindcss/forms",
+        "@tailwindcss/postcss",
+        "tailwind-merge",
+        "tailwindcss-animate",
+        "clsx",
+        "class-variance-authority"
+      ],
+      "groupName": "Tailwind ecosystem"
+    },
+    {
+      "description": "Group Supabase clients",
+      "matchPackageNames": ["/^@supabase/.*/"],
+      "groupName": "Supabase clients"
+    },
+    {
+      "description": "Pin GitHub Actions to full SHA (post-tj-actions hardening)",
+      "matchManagers": ["github-actions"],
+      "pinDigests": true
+    },
+    {
+      "description": "Major upgrades — require manual review, never auto-merge",
+      "matchUpdateTypes": ["major"],
+      "automerge": false,
+      "labels": ["dependencies", "major-update"]
+    }
+  ],
+  "github-actions": {
+    "enabled": true,
+    "pinDigests": true
+  },
+  "docker": {
+    "enabled": true
+  },
+  "nvm": {
+    "enabled": true
+  },
+  "npm": {
+    "minimumReleaseAge": "3 days"
+  }
+}
